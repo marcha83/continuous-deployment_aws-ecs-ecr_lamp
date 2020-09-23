@@ -50,7 +50,7 @@ Parameters:
   
   ImageUrl:
     Type: String
-    Default: 
+    Default: amazon/amazon-ecs-sample
     Description: The url of a docker initial image, until continuous-deployment pipeline stack is driven
   
   ContainerPort:
@@ -233,7 +233,7 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn: LoadBalancerRule
     Properties:
-      ServiceName: !Join ['_', [!Ref "AWS::StackName", !Ref "ServiceName", !Ref "Env" ]]
+      ServiceName: !Join ['-', [!Ref "AWS::StackName", !Ref "ServiceName", !Ref "Env" ]]
       Cluster:
         Fn::ImportValue:
           Fn::Sub: "${ECSCluster}-ECSCluster"
@@ -266,8 +266,7 @@ Outputs:
 
   ServiceName:
     Description: Service name
-    Value:
-      Ref: Service
+    Value: !GetAtt Service.Name
     Export:
       Name:
         Fn::Sub: "${AWS::StackName}-ServiceName"
