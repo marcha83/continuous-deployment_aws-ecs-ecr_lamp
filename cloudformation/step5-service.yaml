@@ -1,0 +1,273 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# This CloudFormation template - AWS LAMP infrastructure setup
+# ECS task definition, service definition, target group..
+
+Parameters:
+  Env:
+    Description: Select environment (prod or dev)
+    Type: String
+    Default: prod
+    AllowedValues: 
+      - prod
+      - dev
+    ConstraintDescription: Must be a prod or dev
+
+  NetworkStackName:
+    Description: Name of the network stack with all infra resources 
+    Type: String
+    Default: network
+
+  LBStackName:
+    Description: Name of the load balancer stack 
+    Type: String
+    Default: lb
+
+  ECSCluster:
+    Description: Name of the ECS cluster stack 
+    Type: String
+    Default: ecs
+
+  DBStack:
+    Description: Name of the db stack 
+    Type: String
+    Default: db
+
+  ServiceName:
+    Type: String
+    Default: lamp
+    Description: A human-readable name for the service.
+  
+  HealthCheckPath:
+    Type: String
+    Default: /
+    Description: Path to perform the healthcheck
+  
+  HealthCheckIntervalSeconds:
+    Type: Number
+    Default: 10
+    Description: Number of seconds to wait between each health check.
+  
+  ImageUrl:
+    Type: String
+    Default: 
+    Description: The url of a docker initial image, until continuous-deployment pipeline stack is driven
+  
+  ContainerPort:
+    Type: Number
+    Default: 80
+    Description: The port number the application inside the docker container 
+      is binding to.
+  
+  ContainerCpu:
+    Type: Number
+    Default: 256
+    Description: How much CPU to give the container. 1024 is 1 CPU.
+  
+  ContainerMemory:
+    Type: Number
+    Default: 512
+    Description: How much memory in megabytes to give the container.
+ 
+  Path:
+    Type: String
+    Default: "*"
+    Description: A path on the public load balancer that this service
+      should be connected to.
+  
+  DesiredCount:
+    Type: Number
+    Default: 2
+    Description: How many copies of the service task to run
+
+  DBDNSHostENVName:
+    Type: String
+    Default: DB_HOST
+    Description: SQL DNS addr - container env variable
+
+  DBDNSHost:
+    Type: String
+    Description: SQL DNS addr
+    ConstraintDescription: Check output value from db stack
+
+  DBUserENVName:
+    Type: String
+    Default: DB_USER
+    Description: SQL DB user  - container env variable
+    ConstraintDescription: Check output value from db stack
+
+  DBUser:
+    Type: String
+    Default: ''
+    Description: SQL DB username
+    ConstraintDescription: Check output value from db stack
+
+  DBPasswdENVName:
+    Type: String
+    Default: DB_PASSWORD
+    Description: SQL DB user passwd - container env variable
+    ConstraintDescription: Check output value from db stack
+
+  DBPasswd:
+    Type: String
+    Default: ''
+    Description: SQL DB user passwd 
+    ConstraintDescription: Check output value from db stack
+
+  DBNameENVName:
+    Type: String
+    Default: DB_NAME
+    Description: SQL DB instance - container env variable
+    ConstraintDescription: Check output value from db stack
+
+  DBName:
+    Type: String
+    Default: ''
+    Description: SQL DB instance name 
+    ConstraintDescription: Check output value from db stack
+
+  DBPortENVName:
+    Type: String
+    Default: DB_PORT
+    Description: SQL DB instance port - container env variable
+    ConstraintDescription: Check output value from db stack
+
+  DBPort:
+    Type: Number
+    Default: 3306
+    Description: SQL DB instance port 
+    ConstraintDescription: Check output value from db stack
+
+
+Resources:
+
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref ServiceName
+      RetentionInDays: 365
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: !Ref HealthCheckIntervalSeconds
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      TargetType: ip
+      Name: !Join ['-', [!Ref "AWS::StackName", !Ref "ServiceName", !Ref "Env", "tggroup" ]]
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+        - Key: stickiness.enabled
+          Value: true
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: 43200
+      VpcId:
+        Fn::ImportValue:
+          Fn::Sub: "${NetworkStackName}-VPCid"
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "targetgroup" ]]
+  
+  LoadBalancerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      Conditions:
+        - Field: path-pattern
+          Values: [!Ref 'Path']
+      ListenerArn:
+        Fn::ImportValue:
+          Fn::Sub: "${LBStackName}-PubLBListener"
+      Priority: 1
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref ServiceName
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn:
+        Fn::ImportValue:
+          Fn::Sub: "${ECSCluster}-ECSTaskExecutionRole"
+      ContainerDefinitions:
+        - Name: !Ref ServiceName
+          Image: !Ref ImageUrl
+          #Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/test:latest
+          PortMappings:
+            - containerPort: !Ref ContainerPort
+          Environment:
+            - Name: !Ref DBUserENVName
+              Value: !Ref DBUser
+            - Name: !Ref DBDNSHostENVName
+              Value: !Ref DBDNSHost
+            - Name: !Ref DBPasswdENVName
+              Value: !Ref DBPasswd
+            - Name: !Ref DBNameENVName
+              Value: !Ref DBName
+            - Name: !Ref DBPortENVName
+              Value: !Ref DBPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CloudWatchLogsGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref ServiceName
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref "ServiceName", !Ref "Env", "taskdefinition" ]]
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerRule
+    Properties:
+      ServiceName: !Join ['_', [!Ref "AWS::StackName", !Ref "ServiceName", !Ref "Env" ]]
+      Cluster:
+        Fn::ImportValue:
+          Fn::Sub: "${ECSCluster}-ECSCluster"
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      DesiredCount: !Ref DesiredCount
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Fn::ImportValue:
+                Fn::Sub: "${ECSCluster}-ECSSecurityGroup"
+          Subnets:
+            - Fn::ImportValue:
+                Fn::Sub: "${NetworkStackName}-PubASubnetID"
+            - Fn::ImportValue:
+                Fn::Sub: "${NetworkStackName}-PubBSubnetID"
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerName: !Ref ServiceName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref "ServiceName", !Ref "Env" ]]
+
+Outputs:
+
+  ServiceName:
+    Description: Service name
+    Value:
+      Ref: Service
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-ServiceName"

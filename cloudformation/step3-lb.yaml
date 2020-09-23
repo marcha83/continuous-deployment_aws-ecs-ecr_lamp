@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# This CloudFormation template - AWS LAMP infrastructure setup
+# load balancer with dumy target group
+
+Parameters:
+  Env:
+    Description: Select environment (prod or dev)
+    Type: String
+    Default: prod
+    AllowedValues: 
+      - prod
+      - dev
+    ConstraintDescription: must be a prod or dev
+
+  NetworkStackName:
+    Description: Name of the network stack with all infra resources 
+    Type: String
+    Default: network
+
+  CertificateARN:
+    Default: ''
+    Description: ARN of certificate
+    Type: String
+
+
+
+Resources:
+  PubLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ['-', [!Ref "Env", PubLBSecurityGroup]]
+      GroupDescription: Access to the public load balancer
+      VpcId: 
+        Fn::ImportValue:
+          Fn::Sub: "${NetworkStackName}-VPCid"
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref "Env"]]
+  
+  PubLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Join ['-', [!Ref "Env", PubLB]]
+      Scheme: internet-facing
+      Subnets:
+        - Fn::ImportValue:
+            Fn::Sub: '${NetworkStackName}-PubASubnetID'
+        - Fn::ImportValue:
+            Fn::Sub: '${NetworkStackName}-PubBSubnetID'
+      SecurityGroups: [!Ref 'PubLBSecurityGroup']
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref "Env"]]
+      
+
+  DummyTargetGroupPublic:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref "Env", DummyTargetGroupPublic]]
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Name: "no-op"
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: 
+        Fn::ImportValue:
+          Fn::Sub: "${NetworkStackName}-VPCid"
+      Tags:
+       - Key: Name
+         Value: !Join ['_', [!Ref "AWS::StackName", !Ref "Env"]]         
+
+  PubLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - PubLB
+    Properties:
+        LoadBalancerArn: !Ref PubLB
+        DefaultActions:
+          - Type: forward
+            TargetGroupArn: !Ref DummyTargetGroupPublic
+        Port: 443
+        Protocol: HTTPS
+        Certificates:
+          - CertificateArn: !Ref CertificateARN
+
+  PubLBHttpRedirect:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - PubLB
+    Properties:
+      DefaultActions:
+        - RedirectConfig:
+            Host: "#{host}"
+            Path: "/#{path}"
+            Port: 443
+            Protocol: "HTTPS"
+            Query: "#{query}"
+            StatusCode: HTTP_301
+          Type: redirect
+      LoadBalancerArn: !Ref 'PubLB'
+      Port: 80
+      Protocol: HTTP
+
+
+Outputs:
+  PubLBSecurityGroup:
+    Description: Public load balancer security group
+    Value:
+      Ref: PubLBSecurityGroup
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PubLBSecurityGroup"
+
+  PubLB:
+    Description: Public load balancer 
+    Value:
+      Ref: PubLB
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PubLB"
+
+  PubLBListener:
+    Description: Public load balancer listener
+    Value:
+      Ref: PubLBListener
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PubLBListener"
+
+  LBurl:
+    Description: URL of LB
+    Value: !GetAtt PubLB.DNSName

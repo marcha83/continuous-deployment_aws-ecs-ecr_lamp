@@ -1,0 +1,254 @@
+AWSTemplateFormatVersion: 2010-09-09
+# This CloudFormation template - AWS LAMP infrastructure setup
+# network stack (VPC, subnets)
+
+Parameters:
+  Env:
+    Description: Select environment (prod or dev)
+    Type: String
+    Default: prod
+    AllowedValues: 
+      - prod
+      - dev
+    ConstraintDescription: must be a prod or dev
+
+Mappings:
+  VPCCidr:
+    prod: 
+      range: 10.101.0.0/16
+       
+    dev: 
+      range: 10.201.0.0/16
+
+  PubSub:
+    prod: 
+      A: 10.101.1.0/24
+      B: 10.101.3.0/24
+
+    dev: 
+      A: 10.201.1.0/24
+      B: 10.201.3.0/24 
+
+  PrivSub:
+    prod: 
+      A: 10.101.2.0/24
+      B: 10.101.4.0/24
+    dev: 
+      A: 10.201.2.0/24
+      B: 10.201.4.0/24
+
+
+Resources:
+
+### creating VPC ###
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [VPCCidr, !Ref Env, range]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "vpc" ]]
+
+### creating VPC pub-public subnets ###
+  PublicSubA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !FindInMap [PubSub, !Ref Env, A]
+      AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AvailabilityZone from the list       
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "public-A" ]]
+
+  PublicSubB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !FindInMap [PubSub, !Ref Env, B]
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AvailabilityZone from the list       
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "public-B" ]]
+
+  PrivateSubA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !FindInMap [PrivSub, !Ref Env, A]
+      AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AvailabilityZone from the list       
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "private-A" ]]
+
+  PrivateSubB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !FindInMap [PrivSub, !Ref Env, B]
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AvailabilityZone from the list       
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "private-B" ]]
+
+### internet access for VPC ###
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+    Properties: 
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env"]]
+  
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+### routing ###
+  PubRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "public-route-table" ]]
+
+  PubIntGw:   
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PubRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway 
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubA
+      RouteTableId: !Ref PubRouteTable
+  
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubB
+      RouteTableId: !Ref PubRouteTable
+
+  PrivRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "private-route-table" ]]
+
+  PrivRouteNATgw:           
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATgw
+      
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubA
+      RouteTableId: !Ref PrivRouteTable
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubB
+      RouteTableId: !Ref PrivRouteTable
+
+### NAT gw ###
+  NATgw:
+    Type: AWS::EC2::NatGateway
+    Properties:
+
+      AllocationId: !GetAtt ElasticIPAddress.AllocationId
+      SubnetId: !Ref PublicSubA
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "NATgw" ]]
+
+### Elastic IP ###
+  ElasticIPAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "elasticIP" ]]
+
+
+Outputs:
+  VPCId:
+    Description: VPC id
+    Value:
+      Ref: VPC
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-VPCid"
+  
+  PublicSubA:
+    Description: public A subnet ID
+    Value:
+      Ref: PublicSubA
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PubASubnetID"
+
+  PublicSubB:
+    Description: public B subnet ID 
+    Value:
+      Ref: PublicSubB
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PubBSubnetID"
+
+  PrivateSubA:
+    Description: private A subnet ID 
+    Value:
+      Ref: PrivateSubA
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PrivASubnetID"
+
+  PrivateSubB:
+    Description: private B subnet ID 
+    Value:
+      Ref: PrivateSubB
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PrivBSubnetID"
+
+  PubSubACidr:
+    Description: public A subnet Cidr
+    Value: !FindInMap [PubSub, !Ref Env, A]
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PubASubnetCidr"
+
+  PubSubBCidr:
+    Description: public B subnet Cidr 
+    Value: !FindInMap [PubSub, !Ref Env, B]
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PubBSubnetCidr"
+
+  PrivateSubACidr:
+    Description: private A subnet Cidr
+    Value: !FindInMap [PrivSub, !Ref Env, A]
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PrivASubnetCidr"
+
+  PrivateSubBCidr:
+    Description: private B subnet Cidr
+    Value: !FindInMap [PrivSub, !Ref Env, B]
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-PrivBSubnetCidr"

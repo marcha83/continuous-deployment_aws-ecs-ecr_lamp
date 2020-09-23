@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# This CloudFormation template - AWS LAMP infrastructure setup
+# MySQL RDS
+
+Parameters:
+  Env:
+    Description: Select environment (prod or dev)
+    Type: String
+    Default: prod
+    AllowedValues: 
+      - prod
+      - dev
+    ConstraintDescription: must be a prod or dev
+
+  NetworkStackName:
+    Description: Name of the network stack with all infra resources 
+    Type: String
+    Default: network
+
+  DBName:
+    Default: appdb
+    Description: The database name
+    Type: String
+    MinLength: '1'
+    MaxLength: '8'
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters.
+  
+  DBUsername:
+    Default: dbuser
+    Description: The database admin account username
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters.
+  
+  DBPassword:
+    Default: user1234
+    Description: The database admin account password
+    Type: String
+    MinLength: 8
+  
+  DBClass:
+    Default: db.t2.micro
+    Description: Database instance class
+    Type: String
+    AllowedValues:
+    - db.t2.micro
+    - db.t2.small
+    - db.t2.large
+
+    ConstraintDescription: must select a valid database instance type.
+  
+  DBAllocatedStorage:
+    Default: 5
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: 5
+    MaxValue: 6144
+    ConstraintDescription: must be between 5+
+
+  DBParamFamily:
+    Default: mariadb
+    Description:  Database parameter group Family name
+    Type: String
+
+
+Mappings:
+  PubSub:
+    prod: 
+      A: 10.101.1.0/24
+      B: 10.101.3.0/24
+
+    dev: 
+      A: 10.201.1.0/24
+      B: 10.201.3.0/24 
+  
+  PrivSub:
+    prod: 
+      A: 10.101.2.0/24
+      B: 10.101.4.0/24
+    dev: 
+      A: 10.201.2.0/24
+      B: 10.201.4.0/24
+
+Resources:
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ['-', [!Ref "Env", DBSecurityGroup]]
+      GroupDescription: Frontend Access
+      VpcId:
+        Fn::ImportValue:
+          Fn::Sub: "${NetworkStackName}-VPCid"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+        CidrIp: !FindInMap [PubSub, !Ref Env, A]
+      - IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+        CidrIp: !FindInMap [PubSub, !Ref Env, B]
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref Env]]
+
+  
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Join ['-', [!Ref Env, DBSubnetGroup]]
+      DBSubnetGroupDescription: DB Private Subnet
+      SubnetIds:
+        - Fn::ImportValue:
+            Fn::Sub: '${NetworkStackName}-PrivASubnetID'
+        - Fn::ImportValue:
+            Fn::Sub: '${NetworkStackName}-PrivBSubnetID'
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref Env]]
+
+  appDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: !Ref DBParamFamily
+      DBName: 
+        Ref: DBName
+      AllocatedStorage:
+        Ref: DBAllocatedStorage
+      DBInstanceClass:
+        Ref: DBClass
+      Engine: !Ref DBParamFamily
+      MasterUsername:
+        Ref: DBUsername
+      MasterUserPassword:
+        Ref: DBPassword
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      PreferredBackupWindow: 01:00-02:00
+      PreferredMaintenanceWindow: mon:04:00-mon:05:00
+      VPCSecurityGroups: 
+      - Fn::GetAtt:
+        - DBSecurityGroup
+        - GroupId
+      Tags:
+        - Key: Name
+          Value: !Join ['_', [!Ref "AWS::StackName", !Ref Env]]
+
+
+Outputs:
+
+  DNSName:
+    Description: 'The connection endpoint for the database'
+    Value: !GetAtt 'appDB.Endpoint.Address'
+    Export:
+      Name: !Sub '${AWS::StackName}-DNSName'
+
+  DBName:
+    Description: 'Instace database name'
+    Value: !Ref DBName
+    Export:
+      Name: !Sub '${AWS::StackName}-DBName' 
+
+  DBUser:
+    Description: 'Database user'
+    Value: !Ref DBUsername
+    Export:
+      Name: !Sub '${AWS::StackName}-DBUsername'  
+
+  DBPasswd:
+    Description: 'IDatabase user passwd'
+    Value: !Ref DBPassword
+    Export:
+      Name: !Sub '${AWS::StackName}-DBPassword'    

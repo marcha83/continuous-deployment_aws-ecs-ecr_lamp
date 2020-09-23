@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# This CloudFormation template - AWS LAMP infrastructure setup
+# ECS cluster setup
+
+Parameters:
+  Env:
+    Description: Select environment (prod or dev)
+    Type: String
+    Default: prod
+    AllowedValues: 
+      - prod
+      - dev
+    ConstraintDescription: must be a prod or dev
+
+  NetworkStackName:
+    Description: Name of the network stack with all infra resources 
+    Type: String
+    Default: network
+
+  LBStackName:
+    Description: Name of the load balancer stack 
+    Type: String
+    Default: lb
+
+  ContainerPort:
+    Type: Number
+    Default: 80
+    Description: The port number the application inside the docker container 
+      is binding to
+
+  ClusterName:
+    Type: String
+    Default: lamp
+    Description: Cluster name
+
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join ['_', [!Ref "AWS::StackName", !Ref "ClusterName", !Ref "Env"]]
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "ECScluster" ]]
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ['-', [!Ref "Env", ECSSecurityGroup]]
+      GroupDescription: Access to the ECS containers
+      VpcId: 
+        Fn::ImportValue:
+          Fn::Sub: "${NetworkStackName}-VPCid"
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "ECSSecurityGroup" ]]
+
+  ECSSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress from the public ALB
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: -1
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId:
+        Fn::ImportValue:
+          Fn::Sub: "${LBStackName}-PubLBSecurityGroup"
+
+
+#Roles
+
+  ECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:AttachNetworkInterface'
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:CreateNetworkInterfacePermission'
+                  - 'ec2:DeleteNetworkInterface'
+                  - 'ec2:DeleteNetworkInterfacePermission'
+                  - 'ec2:Describe*'
+                  - 'ec2:DetachNetworkInterface'
+                  - 'elasticloadbalancing:DeregisterInstancesFromLoadBalancer'
+                  - 'elasticloadbalancing:DeregisterTargets'
+                  - 'elasticloadbalancing:Describe*'
+                  - 'elasticloadbalancing:RegisterInstancesWithLoadBalancer'
+                  - 'elasticloadbalancing:RegisterTargets'
+                Resource: '*'
+      RoleName: !Join ['-', [!Ref "Env", ECSRole]]
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "ECSRole" ]]
+
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: AmazonECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ecr:GetAuthorizationToken"
+                  - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:GetDownloadUrlForLayer"
+                  - "ecr:BatchGetImage"
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+      RoleName: !Join ['-', [!Ref "Env", ECSTaskExecutionRole]]
+      Tags:
+      - Key: Name
+        Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "ECSTaskExecutionRole" ]]
+
+Outputs:
+
+  ECSCluster:
+    Description: ECS cluster
+    Value:
+      Ref: ECSCluster
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-ECSCluster"
+
+  ECSSecurityGroup:
+    Description: ECS security group
+    Value:
+      Ref: ECSSecurityGroup
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-ECSSecurityGroup"
+
+  ECSRole:
+    Description: ARN of the ECS role
+    Value: !GetAtt ECSRole.Arn
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-ECSRole"
+
+  ECSTaskExecutionRole:
+    Description: ARN of the ECSTaskExecutionRole role
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-ECSTaskExecutionRole"
