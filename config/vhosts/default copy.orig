@@ -1,0 +1,17 @@
+<VirtualHost *:80>
+    ServerAdmin webmaster@localhost1
+    DocumentRoot /var/www/html/app1
+    ServerName app1.awesome.app
+</VirtualHost>
+
+<VirtualHost *:80>
+    ServerAdmin webmaster@localhost2
+    DocumentRoot /var/www/html/app2
+    ServerName app2.awesome.app
+</VirtualHost>
+
+<VirtualHost *:80>
+    ServerAdmin webmaster@localhost3
+    DocumentRoot /var/www/html/app3
+    ServerName app3.awesome.app
+</VirtualHost>
