@@ -47,6 +47,7 @@ RUN cd /opt \
     && chmod +x wp-cli.phar \
     && mv wp-cli.phar /usr/local/bin/wp
 
+COPY apps/index.html /var/www/html/index.html
 COPY apps/app1 /var/www/html/app1
 COPY apps/app2 /var/www/html/app2
 COPY apps/app3 /var/www/html/app3
