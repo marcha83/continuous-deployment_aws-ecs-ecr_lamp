@@ -155,7 +155,7 @@ Resources:
 
 Outputs:
 
-  DNSName:
+  DBDNSHost:
     Description: 'The connection endpoint for the database'
     Value: !GetAtt 'appDB.Endpoint.Address'
     Export:

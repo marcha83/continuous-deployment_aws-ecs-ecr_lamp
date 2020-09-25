@@ -39,7 +39,7 @@ Resources:
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Join ['_', [!Ref "AWS::StackName", !Ref "ClusterName", !Ref "Env"]]
+      ClusterName: !Join ['-', [!Ref "AWS::StackName", !Ref "ClusterName", !Ref "Env"]]
       Tags:
       - Key: Name
         Value:  !Join ['_', [!Ref "AWS::StackName", !Ref "Env", "ECScluster" ]]
@@ -137,7 +137,7 @@ Resources:
 
 Outputs:
 
-  ECSCluster:
+  ECSClusterName:
     Description: ECS cluster
     Value:
       Ref: ECSCluster
