@@ -31,7 +31,7 @@ This concept presents continuous deployment consist of six steps provided by AWS
 
 Description of continuous deployment steps:
 - **Step 1** – developers create/modify source code and push to master branch of source repository service (in our case GitHub)
-- **Step 2** – AWS CodePipeline polls the source code from repository and triggers execution of pipeline
+- **Step 2** – AWS CodePipeline pulls the source code from repository and triggers execution of pipeline
 - **Step 3** – AWS CodePipeline executes build process on AWS CloudBuild who creates/builds Docker image 
 - **Step 4** – AWS CodeBuild push newly created image to ECR (Elastic Container Registry) with tag and revision ID
 - **Step 5** – AWS CodePipeline initiates an update of ECS task and service definition with new image location
